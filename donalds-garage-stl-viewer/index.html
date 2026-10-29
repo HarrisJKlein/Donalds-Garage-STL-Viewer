@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Donald's Garage STL viewer. Preview STL files locally in your browser.">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <meta name="theme-color" content="#171717">
+  <title>Donald's Garage — STL Viewer</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./boot.js" defer></script>
+</head>
+<body>
+  <main>
+    <h1>Donald's Garage — STL Viewer</h1>
+    <p>Choose an STL to preview it. Files stay on your device.</p>
+
+    <div id="dropzone">
+      <label for="file-input">STL file:</label>
+      <input id="file-input" type="file" accept=".stl" disabled>
+      <p>Or drag and drop a file here. One .stl file, up to 50 MiB.</p>
+    </div>
+    <p id="status" role="status" aria-live="polite" aria-atomic="true">Starting the viewer…</p>
+
+    <p class="file-details"><strong id="filename" title="No model loaded">No model loaded</strong> <span id="sample-tag" hidden>(demo)</span><br>
+      Triangles: <span id="triangle-count">—</span> · File size: <span id="file-size">—</span><br>
+      Dimensions (X × Y × Z): <span id="dimensions">—</span><br>
+      <small>STL dimensions use the original model units, not necessarily millimeters.</small>
+    </p>
+
+    <section aria-label="Interactive 3D model preview">
+      <div id="viewport" aria-busy="true">
+        <div id="viewport-message">Starting the 3D preview…</div>
+        <div id="drop-overlay" hidden>Drop STL to preview</div>
+      </div>
+      <div class="controls" role="group" aria-label="Model view controls">
+        <button type="button" id="fit-button" disabled>Fit view</button>
+        <button type="button" id="wireframe-button" aria-pressed="false" disabled>Wireframe</button>
+        <button type="button" id="rotate-button" aria-pressed="false" disabled>Auto-rotate</button>
+        <button type="button" id="image-button" disabled>Save image</button>
+        <button type="button" id="clear-button" disabled>Clear</button>
+        <button type="button" id="demo-button" disabled>Try the demo model</button>
+      </div>
+      <p id="interaction-help">Drag to rotate. Scroll or pinch to zoom. Right-drag or use two fingers to pan.<br>Keyboard: focus the preview, then use arrows, + / −, or Home.</p>
+    </section>
+
+    <p class="submission-note"><strong>Preview only.</strong> The native Notion upload form is not integrated. To submit a model, choose the same file separately in the existing Notion form.</p>
+    <noscript><p>Enable JavaScript to use the STL viewer.</p></noscript>
+  </main>
+</body>
+</html>
