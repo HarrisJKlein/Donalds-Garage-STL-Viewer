@@ -17,12 +17,31 @@
     <div id="dropzone">
       <label for="file-input" class="visually-hidden">Choose an STL file</label>
       <input id="file-input" type="file" accept=".stl" disabled>
+      <div class="view-controls" role="group" aria-label="View options">
+        <button id="fit-button" type="button" title="Reset the camera and fit the whole model" disabled>Fit view</button>
+        <button id="auto-restore-button" type="button" aria-pressed="true" title="Restore the camera 10 seconds after your last view adjustment" disabled>Auto-reset: on</button>
+      </div>
     </div>
     <p id="status" role="status" aria-live="polite" aria-atomic="true" hidden></p>
     <div id="viewport" aria-label="3D preview" aria-busy="false">
       <div id="viewport-message" hidden></div>
       <div id="drop-overlay" hidden>Drop STL</div>
     </div>
+    <section id="model-info" class="info-panel" aria-labelledby="info-heading" hidden>
+      <h2 id="info-heading">Info</h2>
+      <p id="model-name"></p>
+      <dl class="model-stats">
+        <div><dt>Triangles</dt><dd id="triangle-count">—</dd></div>
+        <div><dt>File size</dt><dd id="file-size">—</dd></div>
+        <div><dt>Dimensions (X × Y × Z)</dt><dd id="dimensions">—</dd></div>
+      </dl>
+      <h3 id="printer-heading">Printer fit</h3>
+      <table aria-labelledby="printer-heading">
+        <thead><tr><th scope="col">Printer / build volume (mm)</th><th scope="col">Model fit</th></tr></thead>
+        <tbody id="printer-fit"></tbody>
+      </table>
+      <p class="fit-note">STL units are assumed to be millimeters. Fit checks use the model’s bounds in its original or 90° orientations, independent of the camera view. Supports, bed adhesion, and printer settings may need extra room.</p>
+    </section>
     <noscript><p>Enable JavaScript to preview STL files.</p></noscript>
   </main>
 </body>

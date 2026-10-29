@@ -1,11 +1,15 @@
 import * as THREE from './vendor/three.module.min.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { MAX_FILE_BYTES } from './stl-validation.js';
+import { PRINTERS, printerFit, formatDimension, formatFileSize } from './model-info.js';
+import { createViewRestore } from './view-restore.js';
 
 const fileInput = document.getElementById('file-input');
 const viewport = document.getElementById('viewport');
 const status = document.getElementById('status');
 const viewportMessage = document.getElementById('viewport-message');
+const fitButton = document.getElementById('fit-button');
+const autoRestoreButton = document.getElementById('auto-restore-button');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(38, 1, 0.005, 150);
 camera.up.set(0, 0, 1);
@@ -45,6 +49,11 @@ let previousFrame = 0;
 let dragDepth = 0;
 let inView = true;
 let contextLost = false;
+const viewRestore = createViewRestore(() => {
+  if (!contextLost) fitView();
+});
+controls.addEventListener('start', () => viewRestore.start());
+controls.addEventListener('end', () => viewRestore.end());
 
 function render() {
   if (!contextLost) renderer.render(scene, camera);
@@ -94,11 +103,41 @@ function fitView(keepDirection = false) {
   controls.target.set(0, 0, 0);
   camera.position.copy(direction.multiplyScalar(distance));
   controls.maxDistance = Math.max(40, distance * 4);
+  // Fit/reset must restore a consistent pose even when rotation is enabled.
+  const rotating = controls.autoRotate;
+  controls.autoRotate = false;
   controls.update();
+  controls.autoRotate = rotating;
   render();
 }
 
-function showModel(positions) {
+function updateModelInfo(positions, size, file) {
+  document.getElementById('model-name').textContent = file.name;
+  document.getElementById('triangle-count').textContent = (positions.length / 9).toLocaleString();
+  document.getElementById('file-size').textContent = formatFileSize(file.size);
+  const dimensions = [size.x, size.y, size.z];
+  document.getElementById('dimensions').textContent = `${dimensions.map(formatDimension).join(' × ')} mm`;
+  const rows = PRINTERS.map(({ name, volume }) => {
+    const result = printerFit(dimensions, volume);
+    const row = document.createElement('tr');
+    const printer = document.createElement('th');
+    printer.scope = 'row';
+    printer.textContent = name;
+    const buildVolume = document.createElement('span');
+    buildVolume.className = 'build-volume';
+    buildVolume.textContent = volume.join(' × ');
+    printer.append(buildVolume);
+    const fit = document.createElement('td');
+    fit.className = `fit-result ${result}`;
+    fit.textContent = { oriented: 'Fits as oriented', reorient: 'Fits if reoriented', exceeds: 'Exceeds checked bounds' }[result];
+    row.append(printer, fit);
+    return row;
+  });
+  document.getElementById('printer-fit').replaceChildren(...rows);
+  document.getElementById('model-info').hidden = false;
+}
+
+function showModel(positions, file) {
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.computeBoundingBox();
@@ -129,7 +168,10 @@ function showModel(positions) {
   scene.add(mesh);
   viewportMessage.hidden = true;
   controls.autoRotate = true;
+  viewRestore.cancel();
   fitView();
+  updateModelInfo(positions, size, file);
+  fitButton.disabled = contextLost;
   message();
   updateAnimation();
 }
@@ -159,7 +201,7 @@ async function loadFile(file) {
       setBusy(false);
       if (data.error) return message(data.error, true);
       try {
-        showModel(data.positions);
+        showModel(data.positions, file);
         // Show dropped filenames in the same native picker used for selection.
         const selection = new DataTransfer();
         selection.items.add(file);
@@ -198,6 +240,13 @@ fileInput.addEventListener('click', () => { fileInput.value = ''; });
 fileInput.addEventListener('change', () => {
   if (fileInput.files.length) acceptFiles(fileInput.files);
 });
+fitButton.addEventListener('click', () => { viewRestore.cancel(); fitView(); });
+autoRestoreButton.addEventListener('click', () => {
+  const enabled = autoRestoreButton.getAttribute('aria-pressed') !== 'true';
+  autoRestoreButton.setAttribute('aria-pressed', String(enabled));
+  autoRestoreButton.textContent = `Auto-reset: ${enabled ? 'on' : 'off'}`;
+  viewRestore.setEnabled(enabled);
+});
 
 function showDrop(active) {
   document.getElementById('dropzone').classList.toggle('is-dragging', active);
@@ -235,6 +284,7 @@ canvas.addEventListener('keydown', (event) => {
     event.preventDefault();
     controls.autoRotate = !controls.autoRotate;
     updateAnimation();
+    viewRestore.adjusted();
     return;
   }
   const offset = camera.position.clone().sub(controls.target);
@@ -247,7 +297,7 @@ canvas.addEventListener('keydown', (event) => {
     case 'ArrowDown': sphere.phi += step; break;
     case '+': case '=': sphere.radius /= 1.15; break;
     case '-': case '_': sphere.radius *= 1.15; break;
-    case 'Home': event.preventDefault(); fitView(); return;
+    case 'Home': event.preventDefault(); viewRestore.cancel(); fitView(); return;
     default: return;
   }
   event.preventDefault();
@@ -257,6 +307,7 @@ canvas.addEventListener('keydown', (event) => {
   camera.position.set(offset.x, -offset.z, offset.y).add(controls.target);
   controls.update();
   render();
+  viewRestore.adjusted();
 });
 
 controls.addEventListener('change', render);
@@ -274,6 +325,8 @@ document.addEventListener('visibilitychange', updateAnimation);
 canvas.addEventListener('webglcontextlost', (event) => {
   event.preventDefault();
   contextLost = true;
+  viewRestore.cancel();
+  fitButton.disabled = true;
   updateAnimation();
   viewportMessage.hidden = false;
   viewportMessage.textContent = 'Preview paused';
@@ -281,12 +334,14 @@ canvas.addEventListener('webglcontextlost', (event) => {
 });
 canvas.addEventListener('webglcontextrestored', () => {
   contextLost = false;
+  fitButton.disabled = !mesh;
   viewportMessage.hidden = true;
   message();
   render();
   updateAnimation();
 });
 window.addEventListener('pagehide', () => {
+  viewRestore.cancel();
   ++loadVersion;
   cancelParsing();
   setBusy(false);
@@ -295,3 +350,4 @@ window.addEventListener('pagehide', () => {
 });
 window.addEventListener('pageshow', updateAnimation);
 fileInput.disabled = false;
+autoRestoreButton.disabled = false;
