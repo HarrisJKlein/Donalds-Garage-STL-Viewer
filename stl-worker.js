@@ -1,5 +1,5 @@
 import { STLLoader } from './vendor/STLLoader.js';
-import { validateSTLBuffer, validatePositions } from './stl-validation.js?v=20261029-2';
+import { validateSTLBuffer, validatePositions } from './stl-validation.js?v=20261029-3';
 
 self.onmessage = ({ data: buffer }) => {
   let geometry;

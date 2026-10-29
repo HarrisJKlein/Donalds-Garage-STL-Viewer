@@ -15,6 +15,9 @@ export function estimateTreeSupports(positions, dimensions, volume, axes = [0, 1
   const width = Math.max(1, Math.floor(span[0] / cell));
   const depth = Math.max(1, Math.floor(span[1] / cell));
   const step = Math.max(2, cell * 1.8, size[2] / 120);
+  if (size[2] <= step + GAP || Math.min(size[0], size[1]) < cell * 2) {
+    return { status: 'resolution', segments: new Float32Array(), tips: 0, reached: 0, cell, step };
+  }
   const layers = Math.ceil(size[2] / step) + 1;
   const count = width * depth;
   const columns = Array.from({ length: count }, () => []);
@@ -53,6 +56,7 @@ export function estimateTreeSupports(positions, dimensions, volume, axes = [0, 1
   }
   // Open/nonmanifold surfaces cannot safely be interpreted as solid intervals.
   if (invalid) return { status: 'open', segments: new Float32Array(), tips: 0, reached: 0 };
+  if (!columns.some((column) => column.length)) return { status: 'resolution', segments: new Float32Array(), tips: 0, reached: 0, cell, step };
   const occupied = (index, z, top = z) => {
     const spans = columns[index];
     for (let i = 0; i < spans.length; i += 2) if (top >= spans[i] - 0.05 && z <= spans[i + 1] + 0.05) return true;

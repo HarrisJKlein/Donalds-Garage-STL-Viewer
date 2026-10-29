@@ -1,8 +1,8 @@
 import * as THREE from './vendor/three.module.min.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
-import { MAX_FILE_BYTES } from './stl-validation.js?v=20261029-2';
-import { PRINTERS, printerFit, formatDimension, formatFileSize } from './model-info.js?v=20261029-2';
-import { createViewRestore } from './view-restore.js?v=20261029-2';
+import { MAX_FILE_BYTES } from './stl-validation.js?v=20261029-3';
+import { PRINTERS, printerFit, formatDimension, formatFileSize, scaledDimensions, initialUnit, UNIT_MM } from './model-info.js?v=20261029-3';
+import { createViewRestore } from './view-restore.js?v=20261029-3';
 
 const fileInput = document.getElementById('file-input');
 const viewport = document.getElementById('viewport');
@@ -12,6 +12,9 @@ const fitButton = document.getElementById('fit-button');
 const autoRestoreButton = document.getElementById('auto-restore-button');
 const supportToggle = document.getElementById('support-toggle');
 const supportStatus = document.getElementById('support-status');
+const unitSelect = document.getElementById('unit-select');
+const scalePercent = document.getElementById('scale-percent');
+const printHeight = document.getElementById('print-height');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(38, 1, 0.005, 150);
 camera.up.set(0, 0, 1);
@@ -66,6 +69,7 @@ let supportTimeout = null;
 let supportResults = null;
 let supportState = 'idle';
 let platePreviews = null;
+let autoSelectedInches = false;
 const viewRestore = createViewRestore(() => {
   if (!contextLost) fitView();
 });
@@ -173,7 +177,15 @@ function updateModelInfo(positions, size, file) {
   document.getElementById('triangle-count').textContent = (positions.length / 9).toLocaleString();
   document.getElementById('file-size').textContent = formatFileSize(file.size);
   const dimensions = [size.x, size.y, size.z];
+  document.getElementById('unit-notice').hidden = !autoSelectedInches;
   document.getElementById('dimensions').textContent = `${dimensions.map(formatDimension).join(' × ')} mm`;
+  const warning = document.getElementById('scale-warning');
+  const small = Math.max(...dimensions) < 5;
+  const oversized = PRINTERS.every(({ volume }) => printerFit(dimensions, volume) === 'exceeds');
+  warning.hidden = !small && !oversized;
+  warning.textContent = small
+    ? `This model is only ${formatDimension(size.z)} mm tall and may be too small to see on the plates or estimate supports. Confirm the size, or enter your intended print height.`
+    : 'This print size exceeds all four checked build volumes. Confirm the units and scale, or enter a smaller print height.';
   let previews = [];
   try {
     if (platePreviews) previews = platePreviews(mesh.geometry, dimensions, supportToggle.checked ? supportResults : null);
@@ -211,6 +223,12 @@ function updateModelInfo(positions, size, file) {
       ? `${result === 'reorient' ? 'Shown reoriented' : 'Original orientation'}: ${preview.size.map(formatDimension).join(' × ')} mm`
       : 'Image preview unavailable in this browser.';
     caption.append(note);
+    if (Math.max(...dimensions) / Math.max(...volume) < 0.015) {
+      const sizeNote = document.createElement('p');
+      sizeNote.className = 'preview-size-note';
+      sizeNote.textContent = 'The model is too small to distinguish clearly at this plate scale.';
+      caption.append(sizeNote);
+    }
     if (supportToggle.checked) {
       const estimate = supportResults?.[index];
       const supportNote = document.createElement('p');
@@ -223,6 +241,7 @@ function updateModelInfo(positions, size, file) {
         outside: 'Supports not estimated: model exceeds the checked build volume.',
         complex: 'Model too complex for the quick support estimate. Use your slicer.',
         open: 'A closed mesh is needed for this support estimate. Repair it in your slicer.',
+        resolution: 'Model too small or thin for the support estimate’s resolution. Check print size or use your slicer.',
       }[estimate.status] ?? 'Support estimate unavailable.';
       caption.append(supportNote);
     }
@@ -231,6 +250,35 @@ function updateModelInfo(positions, size, file) {
   });
   document.getElementById('printer-fit').replaceChildren(...cards);
   document.getElementById('model-info').hidden = false;
+}
+
+function supportSummary() {
+  const count = supportResults?.filter((result) => result.status === 'estimated').length ?? 0;
+  return count
+    ? `Coarse support estimate ready for ${count} of 4 printers. Confirm the final layout in your slicer.`
+    : 'No support layout could be estimated. Check the print size and the notes for each printer.';
+}
+
+function applyPrintSize() {
+  if (!modelDetails) return;
+  scalePercent.setCustomValidity('');
+  printHeight.setCustomValidity('');
+  const percent = Number(scalePercent.value);
+  let dimensions;
+  try {
+    dimensions = scaledDimensions(modelDetails.rawSize.toArray(), unitSelect.value, percent);
+  } catch (error) {
+    scalePercent.setCustomValidity(error.message);
+    scalePercent.reportValidity();
+    return;
+  }
+  cancelSupportAnalysis();
+  supportResults = null;
+  supportState = 'idle';
+  modelDetails.size.set(...dimensions);
+  printHeight.value = String(Number(modelDetails.size.z.toPrecision(10)));
+  updateModelInfo(mesh.geometry.attributes.position.array, modelDetails.size, modelDetails.file);
+  if (supportToggle.checked) startSupportAnalysis();
 }
 
 function cancelSupportAnalysis() {
@@ -256,7 +304,7 @@ function startSupportAnalysis() {
     updateModelInfo(geometry.attributes.position.array, modelDetails.size, modelDetails.file);
   };
   try {
-    const instance = new Worker(new URL('./support-worker.js?v=20261029-2', import.meta.url), { type: 'module' });
+    const instance = new Worker(new URL('./support-worker.js?v=20261029-3', import.meta.url), { type: 'module' });
     supportWorker = instance;
     instance.onmessage = ({ data }) => {
       if (supportWorker !== instance || mesh.geometry !== geometry) return;
@@ -269,7 +317,7 @@ function startSupportAnalysis() {
       supportResults = data.results;
       supportState = 'complete';
       updateModelInfo(geometry.attributes.position.array, modelDetails.size, modelDetails.file);
-      supportStatus.textContent = 'Coarse support estimate ready. Confirm the final layout in your slicer.';
+      supportStatus.textContent = supportSummary();
     };
     instance.onerror = (event) => { event.preventDefault(); fail('Support analysis could not start. Reload and try again.'); };
     instance.onmessageerror = () => fail('The support estimate could not be read.');
@@ -313,7 +361,16 @@ function showModel(positions, file) {
   cancelSupportAnalysis();
   supportResults = null;
   supportState = 'idle';
-  modelDetails = { size, file };
+  const rawSize = size.clone();
+  unitSelect.value = initialUnit(rawSize.toArray());
+  autoSelectedInches = unitSelect.value === 'in';
+  size.set(...scaledDimensions(rawSize.toArray(), unitSelect.value));
+  scalePercent.value = '100';
+  scalePercent.setCustomValidity('');
+  printHeight.setCustomValidity('');
+  printHeight.disabled = size.z === 0;
+  printHeight.value = String(Number(size.z.toPrecision(10)));
+  modelDetails = { rawSize, size, file };
   scene.add(mesh);
   viewportMessage.hidden = true;
   controls.autoRotate = true;
@@ -338,7 +395,7 @@ async function loadFile(file) {
   try {
     const buffer = await file.arrayBuffer();
     if (version !== loadVersion) return;
-    worker = new Worker(new URL('./stl-worker.js?v=20261029-2', import.meta.url), { type: 'module' });
+    worker = new Worker(new URL('./stl-worker.js?v=20261029-3', import.meta.url), { type: 'module' });
     const fail = (text) => {
       if (version !== loadVersion) return;
       cancelParsing();
@@ -405,8 +462,23 @@ supportToggle.addEventListener('change', () => {
   if (!modelDetails) return;
   supportState = 'idle';
   if (supportToggle.checked && !supportResults) startSupportAnalysis();
-  else if (supportToggle.checked) supportStatus.textContent = 'Coarse support estimate ready. Confirm the final layout in your slicer.';
+  else if (supportToggle.checked) supportStatus.textContent = supportSummary();
   updateModelInfo(mesh.geometry.attributes.position.array, modelDetails.size, modelDetails.file);
+});
+unitSelect.addEventListener('change', () => { autoSelectedInches = false; applyPrintSize(); });
+scalePercent.addEventListener('change', applyPrintSize);
+printHeight.addEventListener('change', () => {
+  if (!modelDetails || modelDetails.rawSize.z === 0) return;
+  const height = Number(printHeight.value);
+  printHeight.setCustomValidity('');
+  const percent = height / (modelDetails.rawSize.z * UNIT_MM[unitSelect.value]) * 100;
+  if (!Number.isFinite(height) || height <= 0 || percent > 1_000_000) {
+    printHeight.setCustomValidity('Enter a positive print height within the allowed scale range.');
+    printHeight.reportValidity();
+    return;
+  }
+  scalePercent.value = String(percent);
+  applyPrintSize();
 });
 
 function showDrop(active) {
@@ -524,7 +596,7 @@ fileInput.disabled = false;
 autoRestoreButton.disabled = false;
 
 // Optional images must not prevent the STL picker and main viewer from starting.
-import('./plate-previews.js?v=20261029-2').then((module) => {
+import('./plate-previews.js?v=20261029-3').then((module) => {
   platePreviews = module.platePreviews;
   if (modelDetails) updateModelInfo(mesh.geometry.attributes.position.array, modelDetails.size, modelDetails.file);
 }).catch((error) => console.warn('Build plate preview module could not load:', error));

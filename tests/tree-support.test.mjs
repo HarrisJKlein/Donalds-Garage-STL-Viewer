@@ -54,3 +54,10 @@ test('does not draw disconnected supports inside a sealed cavity', () => {
   assert.equal(result.reached,0);
   assert.equal(result.segments.length,0);
 });
+
+test('reports a sub-resolution print size instead of claiming no supports were detected', () => {
+  const { positions } = ledgeModel();
+  const result = estimateTreeSupports(positions, [0.61, 0.61, 1.537], [230,190,200]);
+  assert.equal(result.status,'resolution');
+  assert.equal(result.segments.length,0);
+});

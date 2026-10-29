@@ -6,6 +6,20 @@ export const PRINTERS = [
   { name: 'Comgrow T500', volume: [500, 500, 500] },
 ];
 
+export const UNIT_MM = { mm: 1, cm: 10, in: 25.4, m: 1000 };
+
+export function initialUnit(dimensions) {
+  const largest = Math.max(...dimensions);
+  return largest > 0 && largest < 5 ? 'in' : 'mm';
+}
+
+export function scaledDimensions(dimensions, unit = 'mm', percent = 100) {
+  if (!Object.hasOwn(UNIT_MM, unit) || !Number.isFinite(percent) || percent <= 0 || percent > 1_000_000) {
+    throw new Error('Choose valid STL units and a scale above 0% and at most 1,000,000%.');
+  }
+  return dimensions.map((dimension) => dimension * UNIT_MM[unit] * percent / 100);
+}
+
 export function printerFit(dimensions, volume) {
   const axes = printerOrientation(dimensions, volume);
   if (!axes) return 'exceeds';

@@ -9,8 +9,8 @@
   <meta name="theme-color" content="#171717">
   <title>Donald's Garage — STL Viewer</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="./styles.css?v=20261029-2">
-  <script src="./boot.js?v=20261029-2" defer></script>
+  <link rel="stylesheet" href="./styles.css?v=20261029-3">
+  <script src="./boot.js?v=20261029-3" defer></script>
 </head>
 <body>
   <main aria-label="STL viewer">
@@ -30,6 +30,21 @@
     <section id="model-info" class="info-panel" aria-labelledby="info-heading" hidden>
       <h2 id="info-heading">Info</h2>
       <p id="model-name"></p>
+      <div class="size-controls" role="group" aria-label="Print size">
+        <label>STL units
+          <select id="unit-select">
+            <option value="mm">Millimeters (mm)</option>
+            <option value="cm">Centimeters (cm)</option>
+            <option value="in">Inches (in)</option>
+            <option value="m">Meters (m)</option>
+          </select>
+        </label>
+        <label>Scale (%)<input id="scale-percent" type="number" min="0.001" max="1000000" step="any" value="100"></label>
+        <label>Print height (mm)<input id="print-height" type="number" min="0.001" step="any"></label>
+      </div>
+      <p id="unit-notice" class="size-help" role="status" hidden>This file measured under 5 mm in every dimension, so inches were selected automatically. You can change STL units to override this.</p>
+      <p class="size-help">STL files don’t store units. Choose the export units, or enter the print height you want. Size changes update the fit and support estimates; your file stays unchanged.</p>
+      <p id="scale-warning" class="scale-warning" role="status" hidden></p>
       <dl class="model-stats">
         <div><dt>Triangles</dt><dd id="triangle-count">—</dd></div>
         <div><dt>File size</dt><dd id="file-size">—</dd></div>
@@ -41,7 +56,7 @@
       <p id="support-note" class="fit-note" hidden>Purple branches are a coarse estimate: 45° overhang threshold, 40° branch limit, build-plate only. This is not PrusaSlicer output. Use your printer’s slicer profile for actual supports; support clearance is not included in the fit result.</p>
       <p id="support-status" class="fit-note" role="status" aria-live="polite" hidden></p>
       <div id="printer-fit" class="printer-grid" aria-labelledby="printer-heading"></div>
-      <p class="fit-note">STL units are assumed to be millimeters. Fit checks use the model’s bounds in its original or 90° orientations, independent of the camera view. Supports, bed adhesion, and printer settings may need extra room.</p>
+      <p class="fit-note">Fit checks use the selected units and scale, in the model’s original or 90° orientations, independent of the camera view. Supports, bed adhesion, and printer settings may need extra room.</p>
     </section>
     <noscript><p>Enable JavaScript to preview STL files.</p></noscript>
   </main>

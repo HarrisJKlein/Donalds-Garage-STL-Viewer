@@ -1,5 +1,5 @@
 // Keep a useful message if module loading or WebGL setup fails.
-import('./app.js?v=20261029-2').catch((error) => {
+import('./app.js?v=20261029-3').catch((error) => {
   console.error('Viewer startup failed:', error);
   const status = document.getElementById('status');
   status.hidden = false;

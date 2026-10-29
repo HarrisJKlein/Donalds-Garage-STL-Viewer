@@ -4,10 +4,17 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 import unittest
+import struct
 
 from playwright.sync_api import sync_playwright, expect
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def box_stl(x, y, z):
+    vertices = [(a*x,b*y,c*z) for a,b,c in [(0,0,0),(1,0,0),(1,1,0),(0,1,0),(0,0,1),(1,0,1),(1,1,1),(0,1,1)]]
+    faces = [(0,2,1),(0,3,2),(4,5,6),(4,6,7),(0,1,5),(0,5,4),(1,2,6),(1,6,5),(2,3,7),(2,7,6),(3,0,4),(3,4,7)]
+    return b'unit-test'.ljust(80,b' ') + struct.pack('<I',12) + b''.join(struct.pack('<12fH',0,0,0,*vertices[a],*vertices[b],*vertices[c],0) for a,b,c in faces)
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
@@ -95,6 +102,48 @@ class StartupTests(unittest.TestCase):
         expect(self.page.locator('#status')).to_contain_text('WebGL 2 graphics could not start')
         expect(self.page.locator('#status')).to_contain_text('graphics acceleration')
         expect(self.page.locator('#file-input')).to_be_disabled()
+
+    def test_tiny_model_defaults_to_inches_and_allows_mm_override_and_print_height(self):
+        self.page.goto(self.url, wait_until='networkidle')
+        payload = {'name':'unit-test.stl','mimeType':'application/octet-stream','buffer':box_stl(0.61,0.61,1.537)}
+        self.page.locator('#file-input').set_input_files(payload)
+        expect(self.page.locator('#dimensions')).to_have_text('15.494 × 15.494 × 39.04 mm')
+        expect(self.page.locator('#unit-select')).to_have_value('in')
+        expect(self.page.locator('#unit-notice')).to_be_visible()
+        expect(self.page.locator('#scale-percent')).to_have_value('100')
+        self.page.locator('#unit-select').select_option('mm')
+        expect(self.page.locator('#dimensions')).to_have_text('0.61 × 0.61 × 1.537 mm')
+        expect(self.page.locator('#unit-notice')).to_be_hidden()
+        expect(self.page.locator('#scale-warning')).to_be_visible()
+        tiny_image = self.page.locator('.printer-card img').first.get_attribute('src')
+        self.page.locator('#support-toggle').check()
+        expect(self.page.locator('#support-status')).to_contain_text('No support layout could be estimated', timeout=30000)
+        self.assertTrue(all('too small or thin' in text for text in self.page.locator('.support-caption').all_text_contents()))
+        self.page.locator('#print-height').fill('150')
+        self.page.locator('#print-height').press('Tab')
+        expect(self.page.locator('#dimensions')).to_have_text('59.532 × 59.532 × 150 mm')
+        expect(self.page.locator('#support-status')).to_contain_text('estimate ready for 4 of 4', timeout=30000)
+        expect(self.page.locator('#scale-warning')).to_be_hidden()
+        self.assertNotEqual(tiny_image, self.page.locator('.printer-card img').first.get_attribute('src'))
+        expect(self.page.locator('#triangle-count')).to_have_text('12')
+        expect(self.page.locator('#file-size')).to_have_text('684 bytes')
+        # New files reset scale and apply the initial unit heuristic afresh.
+        self.page.locator('#file-input').set_input_files(payload)
+        expect(self.page.locator('#scale-percent')).to_have_value('100')
+        expect(self.page.locator('#unit-select')).to_have_value('in')
+        expect(self.page.locator('#dimensions')).to_have_text('15.494 × 15.494 × 39.04 mm')
+        self.page.locator('#unit-select').select_option('m')
+        expect(self.page.locator('#dimensions')).to_have_text('610 × 610 × 1,537 mm')
+        self.assertEqual(self.page.locator('.fit-result').all_text_contents(), ['Exceeds checked bounds']*4)
+        self.page.locator('#unit-select').select_option('mm')
+        expect(self.page.locator('#support-status')).to_contain_text('No support layout could be estimated', timeout=30000)
+        expect(self.page.locator('#dimensions')).to_have_text('0.61 × 0.61 × 1.537 mm')
+        self.page.set_viewport_size({'width':375,'height':850})
+        self.assertTrue(self.page.locator('html').evaluate('(e)=>e.scrollWidth<=innerWidth'))
+        self.page.locator('#file-input').set_input_files({'name':'normal.stl','mimeType':'application/octet-stream','buffer':box_stl(60,60,20)})
+        expect(self.page.locator('#unit-select')).to_have_value('mm')
+        expect(self.page.locator('#dimensions')).to_have_text('60 × 60 × 20 mm')
+        expect(self.page.locator('#unit-notice')).to_be_hidden()
 
 
 if __name__ == '__main__':
