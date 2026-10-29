@@ -2,6 +2,7 @@
 import('./app.js').catch((error) => {
   console.error('Viewer startup failed:', error);
   const status = document.getElementById('status');
+  status.hidden = false;
   status.classList.add('is-error');
   status.textContent = location.protocol === 'file:'
     ? 'Open this viewer through GitHub Pages or a local HTTP server. Double-clicking index.html cannot load its modules.'
