@@ -1,9 +1,8 @@
 import * as THREE from './vendor/three.module.min.js';
 import { OrbitControls } from './vendor/OrbitControls.js';
-import { MAX_FILE_BYTES } from './stl-validation.js';
-import { PRINTERS, printerFit, formatDimension, formatFileSize } from './model-info.js';
-import { createViewRestore } from './view-restore.js';
-import { platePreviews } from './plate-previews.js';
+import { MAX_FILE_BYTES } from './stl-validation.js?v=20261029-2';
+import { PRINTERS, printerFit, formatDimension, formatFileSize } from './model-info.js?v=20261029-2';
+import { createViewRestore } from './view-restore.js?v=20261029-2';
 
 const fileInput = document.getElementById('file-input');
 const viewport = document.getElementById('viewport');
@@ -18,7 +17,14 @@ const camera = new THREE.PerspectiveCamera(38, 1, 0.005, 150);
 camera.up.set(0, 0, 1);
 camera.position.set(3.2, -4.8, 3.5);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+} catch (cause) {
+  const error = new Error('WebGL 2 graphics initialization failed.', { cause });
+  error.code = 'WEBGL_UNAVAILABLE';
+  throw error;
+}
 renderer.setClearColor(0x171717, 0);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -59,6 +65,7 @@ let supportWorker = null;
 let supportTimeout = null;
 let supportResults = null;
 let supportState = 'idle';
+let platePreviews = null;
 const viewRestore = createViewRestore(() => {
   if (!contextLost) fitView();
 });
@@ -169,7 +176,7 @@ function updateModelInfo(positions, size, file) {
   document.getElementById('dimensions').textContent = `${dimensions.map(formatDimension).join(' × ')} mm`;
   let previews = [];
   try {
-    previews = platePreviews(mesh.geometry, dimensions, supportToggle.checked ? supportResults : null);
+    if (platePreviews) previews = platePreviews(mesh.geometry, dimensions, supportToggle.checked ? supportResults : null);
   } catch (error) {
     console.warn('Build plate previews unavailable:', error);
   }
@@ -249,7 +256,7 @@ function startSupportAnalysis() {
     updateModelInfo(geometry.attributes.position.array, modelDetails.size, modelDetails.file);
   };
   try {
-    const instance = new Worker(new URL('./support-worker.js', import.meta.url), { type: 'module' });
+    const instance = new Worker(new URL('./support-worker.js?v=20261029-2', import.meta.url), { type: 'module' });
     supportWorker = instance;
     instance.onmessage = ({ data }) => {
       if (supportWorker !== instance || mesh.geometry !== geometry) return;
@@ -331,7 +338,7 @@ async function loadFile(file) {
   try {
     const buffer = await file.arrayBuffer();
     if (version !== loadVersion) return;
-    worker = new Worker(new URL('./stl-worker.js', import.meta.url), { type: 'module' });
+    worker = new Worker(new URL('./stl-worker.js?v=20261029-2', import.meta.url), { type: 'module' });
     const fail = (text) => {
       if (version !== loadVersion) return;
       cancelParsing();
@@ -515,3 +522,9 @@ window.addEventListener('pageshow', () => {
 });
 fileInput.disabled = false;
 autoRestoreButton.disabled = false;
+
+// Optional images must not prevent the STL picker and main viewer from starting.
+import('./plate-previews.js?v=20261029-2').then((module) => {
+  platePreviews = module.platePreviews;
+  if (modelDetails) updateModelInfo(mesh.geometry.attributes.position.array, modelDetails.size, modelDetails.file);
+}).catch((error) => console.warn('Build plate preview module could not load:', error));

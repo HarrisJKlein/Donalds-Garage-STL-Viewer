@@ -1,5 +1,5 @@
-import { estimateTreeSupports } from './tree-support.js';
-import { PRINTERS, printerOrientation } from './model-info.js';
+import { estimateTreeSupports } from './tree-support.js?v=20261029-2';
+import { PRINTERS, printerOrientation } from './model-info.js?v=20261029-2';
 
 self.onmessage = ({ data: { positions, dimensions } }) => {
   try {

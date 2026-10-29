@@ -1,5 +1,5 @@
 import * as THREE from './vendor/three.module.min.js';
-import { PRINTERS, printerFit, printerOrientation } from './model-info.js';
+import { PRINTERS, printerFit, printerOrientation } from './model-info.js?v=20261029-2';
 
 let renderer;
 
