@@ -15,3 +15,5 @@ Files retrieved from the version-pinned npm distribution:
 In OrbitControls and STLLoader, only the bare import `from 'three'` was changed to `from './three.module.min.js'`. This lets the page and worker load the same included library without a package manager, import map, or build step. The two minified Three.js build files are unmodified.
 
 Retain `vendor/LICENSE.txt` when redistributing. The original viewer files and generated demo geometry use the top-level MIT `LICENSE`.
+
+The browser support estimator independently implements algorithmic ideas described in PrusaSlicer 2.9.4's open-source tree/organic support generator. No upstream support-generator code is distributed here. See [docs/tree-supports.md](docs/tree-supports.md) for pinned source references, credits, and the estimator's differences from PrusaSlicer. PrusaSlicer and the Cura tree-support work it credits are AGPL-3.0-or-later; that source remains under its upstream license.

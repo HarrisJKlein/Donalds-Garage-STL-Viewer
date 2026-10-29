@@ -7,12 +7,15 @@ export const PRINTERS = [
 ];
 
 export function printerFit(dimensions, volume) {
-  if (dimensions.every((size, axis) => size <= volume[axis])) return 'oriented';
-  // Sorting tests whether any permutation of the original axes fits, without
-  // claiming an arbitrary-angle packing or slicer clearance check.
-  const sortedSize = [...dimensions].sort((a, b) => a - b);
-  const sortedVolume = [...volume].sort((a, b) => a - b);
-  return sortedSize.every((size, axis) => size <= sortedVolume[axis]) ? 'reorient' : 'exceeds';
+  const axes = printerOrientation(dimensions, volume);
+  if (!axes) return 'exceeds';
+  return axes.every((axis, index) => axis === index) ? 'oriented' : 'reorient';
+}
+
+export function printerOrientation(dimensions, volume) {
+  // Use the same orientation for the fit result and the actual model preview.
+  const orientations = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+  return orientations.find((axes) => axes.every((axis, index) => dimensions[axis] <= volume[index])) ?? null;
 }
 
 export function formatDimension(value) {

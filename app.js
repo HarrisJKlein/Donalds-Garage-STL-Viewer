@@ -3,6 +3,7 @@ import { OrbitControls } from './vendor/OrbitControls.js';
 import { MAX_FILE_BYTES } from './stl-validation.js';
 import { PRINTERS, printerFit, formatDimension, formatFileSize } from './model-info.js';
 import { createViewRestore } from './view-restore.js';
+import { platePreviews } from './plate-previews.js';
 
 const fileInput = document.getElementById('file-input');
 const viewport = document.getElementById('viewport');
@@ -10,6 +11,8 @@ const status = document.getElementById('status');
 const viewportMessage = document.getElementById('viewport-message');
 const fitButton = document.getElementById('fit-button');
 const autoRestoreButton = document.getElementById('auto-restore-button');
+const supportToggle = document.getElementById('support-toggle');
+const supportStatus = document.getElementById('support-status');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(38, 1, 0.005, 150);
 camera.up.set(0, 0, 1);
@@ -49,10 +52,21 @@ let previousFrame = 0;
 let dragDepth = 0;
 let inView = true;
 let contextLost = false;
+let cameraTransition = null;
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+let modelDetails = null;
+let supportWorker = null;
+let supportTimeout = null;
+let supportResults = null;
+let supportState = 'idle';
 const viewRestore = createViewRestore(() => {
   if (!contextLost) fitView();
 });
-controls.addEventListener('start', () => viewRestore.start());
+controls.addEventListener('start', () => {
+  cancelCameraTransition();
+  viewRestore.start();
+  updateAnimation();
+});
 controls.addEventListener('end', () => viewRestore.end());
 
 function render() {
@@ -80,18 +94,47 @@ function updateAnimation() {
   if (animationFrame !== null) cancelAnimationFrame(animationFrame);
   animationFrame = null;
   previousFrame = 0;
-  if (!mesh || !controls.autoRotate || document.hidden || !inView || contextLost) return;
+  if (!mesh || (!controls.autoRotate && !cameraTransition) || document.hidden || !inView || contextLost) return;
   const animate = (now) => {
     const delta = previousFrame ? Math.min((now - previousFrame) / 1000, 0.1) : 0;
     previousFrame = now;
-    controls.update(delta);
+    if (cameraTransition) {
+      const transition = cameraTransition;
+      transition.started ??= now;
+      const progress = Math.min((now - transition.started) / 750, 1);
+      const eased = progress * progress * (3 - 2 * progress);
+      const sphere = new THREE.Spherical(
+        THREE.MathUtils.lerp(transition.from.radius, transition.to.radius, eased),
+        THREE.MathUtils.lerp(transition.from.phi, transition.to.phi, eased),
+        transition.from.theta + transition.angle * eased,
+      );
+      const offset = new THREE.Vector3().setFromSpherical(sphere);
+      controls.target.copy(transition.target).lerp(new THREE.Vector3(), eased);
+      camera.position.set(offset.x, -offset.z, offset.y).add(controls.target);
+      updateControlsWithoutRotation();
+      if (progress === 1) cancelCameraTransition();
+    } else {
+      controls.update(delta);
+    }
     render();
-    animationFrame = requestAnimationFrame(animate);
+    animationFrame = controls.autoRotate || cameraTransition ? requestAnimationFrame(animate) : null;
   };
   animationFrame = requestAnimationFrame(animate);
 }
 
-function fitView(keepDirection = false) {
+function cancelCameraTransition() {
+  cameraTransition = null;
+  viewport.removeAttribute('data-resetting');
+}
+
+function updateControlsWithoutRotation() {
+  const rotating = controls.autoRotate;
+  controls.autoRotate = false;
+  controls.update();
+  controls.autoRotate = rotating;
+}
+
+function fitView(keepDirection = false, animate = true) {
   if (!mesh) return;
   const radius = mesh.geometry.boundingSphere.radius;
   const verticalFov = THREE.MathUtils.degToRad(camera.fov);
@@ -100,14 +143,21 @@ function fitView(keepDirection = false) {
   const direction = keepDirection
     ? camera.position.clone().sub(controls.target).normalize()
     : new THREE.Vector3(3.2, -4.8, 3.5).normalize();
+  controls.maxDistance = Math.max(40, distance * 4);
+  cancelCameraTransition();
+  if (animate && !reducedMotion.matches && !keepDirection) {
+    const offset = camera.position.clone().sub(controls.target);
+    const from = new THREE.Spherical().setFromVector3(new THREE.Vector3(offset.x, offset.z, -offset.y));
+    const to = new THREE.Spherical().setFromVector3(new THREE.Vector3(direction.x, direction.z, -direction.y).multiplyScalar(distance));
+    const difference = to.theta - from.theta;
+    cameraTransition = { from, to, angle: Math.atan2(Math.sin(difference), Math.cos(difference)), target: controls.target.clone(), started: null };
+    viewport.dataset.resetting = 'true';
+    updateAnimation();
+    return;
+  }
   controls.target.set(0, 0, 0);
   camera.position.copy(direction.multiplyScalar(distance));
-  controls.maxDistance = Math.max(40, distance * 4);
-  // Fit/reset must restore a consistent pose even when rotation is enabled.
-  const rotating = controls.autoRotate;
-  controls.autoRotate = false;
-  controls.update();
-  controls.autoRotate = rotating;
+  updateControlsWithoutRotation();
   render();
 }
 
@@ -117,24 +167,112 @@ function updateModelInfo(positions, size, file) {
   document.getElementById('file-size').textContent = formatFileSize(file.size);
   const dimensions = [size.x, size.y, size.z];
   document.getElementById('dimensions').textContent = `${dimensions.map(formatDimension).join(' × ')} mm`;
-  const rows = PRINTERS.map(({ name, volume }) => {
+  let previews = [];
+  try {
+    previews = platePreviews(mesh.geometry, dimensions, supportToggle.checked ? supportResults : null);
+  } catch (error) {
+    console.warn('Build plate previews unavailable:', error);
+  }
+  const cards = PRINTERS.map(({ name, volume }, index) => {
     const result = printerFit(dimensions, volume);
-    const row = document.createElement('tr');
-    const printer = document.createElement('th');
-    printer.scope = 'row';
+    const card = document.createElement('figure');
+    card.className = 'printer-card';
+    const preview = previews[index];
+    if (preview) {
+      const image = document.createElement('img');
+      image.src = preview.image;
+      image.width = 640;
+      image.height = 400;
+      image.alt = `${file.name} on the ${name} build plate; ${result === 'reorient' ? 'reoriented to fit' : result === 'exceeds' ? 'exceeds the checked build volume' : 'fits in the original orientation'}.`;
+      if (supportToggle.checked && supportResults?.[index]?.segments.length) image.alt += ' Purple branches show an estimated tree support layout.';
+      card.append(image);
+    }
+    const caption = document.createElement('figcaption');
+    const printer = document.createElement('span');
+    printer.className = 'printer-name';
     printer.textContent = name;
     const buildVolume = document.createElement('span');
     buildVolume.className = 'build-volume';
-    buildVolume.textContent = volume.join(' × ');
-    printer.append(buildVolume);
-    const fit = document.createElement('td');
+    buildVolume.textContent = `${volume.join(' × ')} mm build volume`;
+    const fit = document.createElement('span');
     fit.className = `fit-result ${result}`;
     fit.textContent = { oriented: 'Fits as oriented', reorient: 'Fits if reoriented', exceeds: 'Exceeds checked bounds' }[result];
-    row.append(printer, fit);
-    return row;
+    caption.append(printer, buildVolume, fit);
+    const note = document.createElement('p');
+    note.className = 'orientation-note';
+    note.textContent = preview
+      ? `${result === 'reorient' ? 'Shown reoriented' : 'Original orientation'}: ${preview.size.map(formatDimension).join(' × ')} mm`
+      : 'Image preview unavailable in this browser.';
+    caption.append(note);
+    if (supportToggle.checked) {
+      const estimate = supportResults?.[index];
+      const supportNote = document.createElement('p');
+      supportNote.className = 'support-caption';
+      if (!estimate) supportNote.textContent = supportState === 'failed' ? 'Support estimate unavailable.' : 'Calculating support estimate…';
+      else if (estimate.status === 'estimated') supportNote.textContent = estimate.tips
+        ? `${estimate.reached} of ${estimate.tips} estimated contacts reach the plate.${estimate.reached < estimate.tips ? ' Check remaining overhangs in your slicer.' : ''}`
+        : 'No support contacts detected at this resolution. Confirm in your slicer.';
+      else supportNote.textContent = {
+        outside: 'Supports not estimated: model exceeds the checked build volume.',
+        complex: 'Model too complex for the quick support estimate. Use your slicer.',
+        open: 'A closed mesh is needed for this support estimate. Repair it in your slicer.',
+      }[estimate.status] ?? 'Support estimate unavailable.';
+      caption.append(supportNote);
+    }
+    card.append(caption);
+    return card;
   });
-  document.getElementById('printer-fit').replaceChildren(...rows);
+  document.getElementById('printer-fit').replaceChildren(...cards);
   document.getElementById('model-info').hidden = false;
+}
+
+function cancelSupportAnalysis() {
+  supportWorker?.terminate();
+  supportWorker = null;
+  clearTimeout(supportTimeout);
+  supportTimeout = null;
+  document.getElementById('printer-fit').setAttribute('aria-busy', 'false');
+}
+
+function startSupportAnalysis() {
+  cancelSupportAnalysis();
+  if (!modelDetails || !supportToggle.checked) return;
+  supportState = 'working';
+  supportStatus.hidden = false;
+  supportStatus.textContent = 'Analyzing supports locally… 0 of 4 printers';
+  document.getElementById('printer-fit').setAttribute('aria-busy', 'true');
+  const geometry = mesh.geometry;
+  const fail = (text) => {
+    cancelSupportAnalysis();
+    supportState = 'failed';
+    supportStatus.textContent = text;
+    updateModelInfo(geometry.attributes.position.array, modelDetails.size, modelDetails.file);
+  };
+  try {
+    const instance = new Worker(new URL('./support-worker.js', import.meta.url), { type: 'module' });
+    supportWorker = instance;
+    instance.onmessage = ({ data }) => {
+      if (supportWorker !== instance || mesh.geometry !== geometry) return;
+      if (data.error) return fail(data.error);
+      if (data.progress) {
+        supportStatus.textContent = `Analyzing supports locally… ${data.progress} of 4 printers`;
+        return;
+      }
+      cancelSupportAnalysis();
+      supportResults = data.results;
+      supportState = 'complete';
+      updateModelInfo(geometry.attributes.position.array, modelDetails.size, modelDetails.file);
+      supportStatus.textContent = 'Coarse support estimate ready. Confirm the final layout in your slicer.';
+    };
+    instance.onerror = (event) => { event.preventDefault(); fail('Support analysis could not start. Reload and try again.'); };
+    instance.onmessageerror = () => fail('The support estimate could not be read.');
+    supportTimeout = setTimeout(() => fail('Support analysis took too long. Use your slicer for this model.'), 45000);
+    const positions = geometry.attributes.position.array.slice();
+    const { x, y, z } = modelDetails.size;
+    instance.postMessage({ positions, dimensions: [x, y, z] }, [positions.buffer]);
+  } catch {
+    fail('Support analysis is unavailable in this browser.');
+  }
 }
 
 function showModel(positions, file) {
@@ -165,15 +303,20 @@ function showModel(positions, file) {
     mesh.material.dispose();
   }
   mesh = new THREE.Mesh(geometry, material);
+  cancelSupportAnalysis();
+  supportResults = null;
+  supportState = 'idle';
+  modelDetails = { size, file };
   scene.add(mesh);
   viewportMessage.hidden = true;
   controls.autoRotate = true;
   viewRestore.cancel();
-  fitView();
+  fitView(false, false);
   updateModelInfo(positions, size, file);
   fitButton.disabled = contextLost;
   message();
   updateAnimation();
+  if (supportToggle.checked) startSupportAnalysis();
 }
 
 async function loadFile(file) {
@@ -246,6 +389,17 @@ autoRestoreButton.addEventListener('click', () => {
   autoRestoreButton.setAttribute('aria-pressed', String(enabled));
   autoRestoreButton.textContent = `Auto-reset: ${enabled ? 'on' : 'off'}`;
   viewRestore.setEnabled(enabled);
+  if (!enabled) { cancelCameraTransition(); updateAnimation(); }
+});
+supportToggle.addEventListener('change', () => {
+  cancelSupportAnalysis();
+  document.getElementById('support-note').hidden = !supportToggle.checked;
+  supportStatus.hidden = !supportToggle.checked;
+  if (!modelDetails) return;
+  supportState = 'idle';
+  if (supportToggle.checked && !supportResults) startSupportAnalysis();
+  else if (supportToggle.checked) supportStatus.textContent = 'Coarse support estimate ready. Confirm the final layout in your slicer.';
+  updateModelInfo(mesh.geometry.attributes.position.array, modelDetails.size, modelDetails.file);
 });
 
 function showDrop(active) {
@@ -280,6 +434,10 @@ window.addEventListener('blur', () => { dragDepth = 0; showDrop(false); });
 
 canvas.addEventListener('keydown', (event) => {
   if (!mesh) return;
+  if (['Space', 'Home', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-', '_'].includes(event.key) || event.code === 'Space') {
+    cancelCameraTransition();
+    updateAnimation();
+  }
   if (event.code === 'Space') {
     event.preventDefault();
     controls.autoRotate = !controls.autoRotate;
@@ -317,7 +475,7 @@ new ResizeObserver(() => {
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  if (mesh) fitView(true);
+  if (mesh) fitView(true, false);
   else render();
 }).observe(viewport);
 new IntersectionObserver(([entry]) => { inView = entry.isIntersecting; updateAnimation(); }).observe(viewport);
@@ -325,6 +483,7 @@ document.addEventListener('visibilitychange', updateAnimation);
 canvas.addEventListener('webglcontextlost', (event) => {
   event.preventDefault();
   contextLost = true;
+  cancelCameraTransition();
   viewRestore.cancel();
   fitButton.disabled = true;
   updateAnimation();
@@ -341,6 +500,8 @@ canvas.addEventListener('webglcontextrestored', () => {
   updateAnimation();
 });
 window.addEventListener('pagehide', () => {
+  cancelSupportAnalysis();
+  cancelCameraTransition();
   viewRestore.cancel();
   ++loadVersion;
   cancelParsing();
@@ -348,6 +509,9 @@ window.addEventListener('pagehide', () => {
   if (animationFrame !== null) cancelAnimationFrame(animationFrame);
   animationFrame = null;
 });
-window.addEventListener('pageshow', updateAnimation);
+window.addEventListener('pageshow', () => {
+  updateAnimation();
+  if (supportToggle.checked && modelDetails && supportState === 'working' && !supportWorker) startSupportAnalysis();
+});
 fileInput.disabled = false;
 autoRestoreButton.disabled = false;

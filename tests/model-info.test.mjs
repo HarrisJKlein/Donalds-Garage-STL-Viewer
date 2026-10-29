@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PRINTERS, printerFit, formatDimension, formatFileSize } from '../model-info.js';
+import { PRINTERS, printerFit, printerOrientation, formatDimension, formatFileSize } from '../model-info.js';
 
 test('nominal printer volumes fit at the boundary, but a larger cube does not', () => {
   for (const { volume } of PRINTERS) {
@@ -21,6 +21,17 @@ test('checks the original dimensions against each printer without mutating them'
   const size = [300, 200, 250];
   assert.deepEqual(PRINTERS.map(({ volume }) => printerFit(size, volume)), ['exceeds', 'oriented', 'oriented', 'oriented']);
   assert.deepEqual(size, [300, 200, 250]);
+});
+
+test('preview orientation agrees with fit results for all axis permutations', () => {
+  const volume = [230, 190, 200];
+  for (const size of [[230, 190, 200], [230, 200, 190], [190, 230, 200], [190, 200, 230], [200, 230, 190], [200, 190, 230]]) {
+    const axes = printerOrientation(size, volume);
+    assert.equal(new Set(axes).size, 3);
+    assert.deepEqual(axes.map((axis) => size[axis]), volume);
+    assert.notEqual(printerFit(size, volume), 'exceeds');
+  }
+  assert.equal(printerOrientation([231, 200, 190], volume), null);
 });
 
 test('formats small dimensions without rounding them to zero, and exact file bytes', () => {

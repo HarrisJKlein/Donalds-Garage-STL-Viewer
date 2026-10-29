@@ -36,10 +36,11 @@
         <div><dt>Dimensions (X × Y × Z)</dt><dd id="dimensions">—</dd></div>
       </dl>
       <h3 id="printer-heading">Printer fit</h3>
-      <table aria-labelledby="printer-heading">
-        <thead><tr><th scope="col">Printer / build volume (mm)</th><th scope="col">Model fit</th></tr></thead>
-        <tbody id="printer-fit"></tbody>
-      </table>
+      <p class="fit-note">Your model on each build plate, to scale. The wireframe shows the printer’s height limit.</p>
+      <label class="support-toggle"><input id="support-toggle" type="checkbox"> Show tree support estimate</label>
+      <p id="support-note" class="fit-note" hidden>Purple branches are a coarse estimate: 45° overhang threshold, 40° branch limit, build-plate only. This is not PrusaSlicer output. Use your printer’s slicer profile for actual supports; support clearance is not included in the fit result.</p>
+      <p id="support-status" class="fit-note" role="status" aria-live="polite" hidden></p>
+      <div id="printer-fit" class="printer-grid" aria-labelledby="printer-heading"></div>
       <p class="fit-note">STL units are assumed to be millimeters. Fit checks use the model’s bounds in its original or 90° orientations, independent of the camera view. Supports, bed adhesion, and printer settings may need extra room.</p>
     </section>
     <noscript><p>Enable JavaScript to preview STL files.</p></noscript>
